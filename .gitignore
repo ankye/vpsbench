@@ -1,0 +1,6 @@
+# 编译产物
+vpsbench
+vpsbench-*
+*.exe
+# 测试临时文件
+*.test

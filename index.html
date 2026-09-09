@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vpsbench · VPS 性能 / 超售检测</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --line:#21262d; --fg:#c9d1d9; --dim:#8b949e;
+  --acc:#58a6ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{margin:0;font-size:18px;color:var(--acc);letter-spacing:.5px}
+header .sub{color:var(--dim);font-size:12px}
+header .tok{margin-left:auto;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--fg);padding:5px 10px;width:180px;font-size:12px}
+.wrap{max-width:1240px;margin:0 auto;padding:18px 22px 60px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card .t{color:var(--dim);font-size:12px;margin-bottom:4px}
+.card .v{font-family:var(--mono);font-size:15px;font-weight:600}
+.card .v.bad{color:var(--bad)} .card .v.warn{color:var(--warn)} .card .v.ok{color:var(--ok)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:14px}
+.ph{display:flex;align-items:center;gap:12px;font-weight:600;margin-bottom:12px}
+.ph .tag{font-size:11px;color:var(--dim);font-weight:400}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+.row label{color:var(--dim);font-size:12px}
+input[type=text],input[type=number]{background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--fg);padding:5px 8px;width:70px;font-family:var(--mono);font-size:13px}
+button{background:#21262d;border:1px solid #30363d;color:var(--fg);border-radius:6px;padding:6px 16px;cursor:pointer;font-size:13px;transition:.15s}
+button:hover:not(:disabled){background:var(--acc);border-color:var(--acc);color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+.out{font-family:var(--mono);font-size:13px;flex:1;min-width:300px}
+.out b{color:var(--acc)}
+pre.result{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-family:var(--mono);font-size:13px;white-space:pre-wrap;margin:8px 0 0;min-height:40px;color:#7ee787}
+canvas{width:100%;height:150px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+.legend{color:var(--dim);font-size:12px;margin-top:6px}
+.muted{color:var(--dim);font-size:12px}
+.ev{font-family:var(--mono);font-size:12px;padding:4px 10px;border-left:3px solid var(--dim);margin:4px 0;background:var(--bg);border-radius:0 6px 6px 0}
+.ev.steal{border-color:var(--bad);color:#ffa198}
+.ev.jitter{border-color:var(--warn);color:#e3b341}
+.verdict{margin-top:8px;font-size:13px}
+.switch{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:12px;font-weight:400;margin-left:auto}
+#srvInfo{font-family:var(--mono);font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ vpsbench</h1>
+  <span class="sub">VPS 性能 · 并发 · 共享宿主机偷取检测</span>
+  <span id="srvInfo"></span>
+  <input type="text" id="token" class="tok" placeholder="访问令牌(可选)">
+</header>
+<div class="wrap">
+
+  <div class="cards">
+    <div class="card"><div class="t">CPU steal(被偷取)</div><div class="v" id="cSteal">-</div></div>
+    <div class="card"><div class="t">调度抖动(基准10ms)</div><div class="v" id="cJit">-</div></div>
+    <div class="card"><div class="t">负载 1/5/15m</div><div class="v" id="cLoad">-</div></div>
+    <div class="card"><div class="t">内存可用</div><div class="v" id="cMem">-</div></div>
+    <div class="card"><div class="t">主机 / CPU</div><div class="v" id="cHost">-</div></div>
+    <div class="card"><div class="t">监控时长</div><div class="v" id="cUp">-</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">实时偷取监控 <span class="tag">最近 120 秒</span>
+      <label class="switch"><input type="checkbox" id="liveOn" checked> 自动刷新(2s)</label>
+    </div>
+    <canvas id="tl" width="1200" height="150"></canvas>
+    <div class="legend">🔴 steal%(虚拟化层承认被邻居偷走的 CPU) &nbsp;·&nbsp; 🟡 每秒最大调度抖动 ms(sleep 10ms 实际偏差,"被偷取延迟"的直接体现)</div>
+    <div class="verdict" id="stealVerdict"></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">网络测试 <span class="tag">从当前浏览器发起,反映你的真实访问链路</span></div>
+    <div class="row">
+      <label>延迟/抖动</label> 时长 <input type="number" id="pDur" value="15"> s · 间隔 <input type="number" id="pIv" value="100"> ms
+      <button onclick="pingTest(this)">▶ 开始</button><span class="out" id="pingOut"></span>
+    </div>
+    <div class="row">
+      <label>并发压测</label> 并发 <input type="number" id="lC" value="50"> · 时长 <input type="number" id="lD" value="20"> s
+      <button onclick="loadTest(this)">▶ 开始</button><span class="out" id="loadOut"></span>
+    </div>
+    <div class="row">
+      <label>包尺寸并发</label> 并发 <input type="number" id="kC" value="50"> · 时长 <input type="number" id="kD" value="8"> s
+      <button onclick="pktTest(1024,this)">▶ 1K</button>
+      <button onclick="pktTest(2048,this)">▶ 2K</button>
+      <button onclick="pktTest(4096,this)">▶ 4K</button>
+      <button onclick="pktLadder(this)">▶ 阶梯 1K→2K→4K</button>
+      <span class="out" id="pktStat"></span>
+    </div>
+    <pre class="result" id="pktOut" style="display:none"></pre>
+    <div class="row">
+      <label>带宽</label> 时长 <input type="number" id="bD" value="8"> s · 流 <input type="number" id="bC" value="4">
+      <button onclick="bwTest(false,this)">▶ 下行</button>
+      <button onclick="bwTest(true,this)">▶ 上行</button><span class="out" id="bwOut"></span>
+    </div>
+    <div class="row">
+      <label>并发连接</label> 目标 <input type="number" id="cN" value="100"> · 保持 <input type="number" id="cH" value="15"> s
+      <button onclick="connTest(this)">▶ 开始</button>
+      <span class="out" id="connOut">⚠ 浏览器对同源 HTTP/1.1 并发有 ~6 条硬限制,测真实并发上限请用 CLI:vpsbench conn &lt;url&gt; -c 500</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">服务端自测 <span class="tag">直接跑在这台 VPS 上</span></div>
+    <div class="row">
+      <button onclick="diagTest(this)">▶ 一键诊断(哪里负载最高)</button>
+      <button onclick="srvTest('cpu',this)">▶ CPU 单核算力</button>
+      <button onclick="srvTest('fill',this)">▶ 打满全部核(超售检测)</button>
+      <button onclick="srvTest('mem',this)">▶ 内存带宽 512MB</button>
+      <button onclick="srvTest('disk',this)">▶ 磁盘 / IO 延迟</button>
+    </div>
+    <pre class="result" id="srvOut">点击上方按钮开始测试…
+</pre>
+  </div>
+
+  <div class="panel">
+    <div class="ph">偷取事件 <span class="tag">steal≥5% 或 抖动≥50ms 时记录</span></div>
+    <div id="events"><div class="muted">加载中…</div></div>
+  </div>
+
+  <div class="panel muted">
+    <b>怎么判断这台 VPS 是否被超售/偷取:</b><br>
+    ① 空闲时段 steal% 持续 &gt; 2% 或出现红色事件 ⇒ 宿主机在把 CPU 分给别人;<br>
+    ② 调度抖动 p99 &gt; 20ms(空闲时)⇒ vCPU 被挂起,你的程序会感受到真实延迟;<br>
+    ③ 打满全部核后"核数兑现率" &lt; 85% ⇒ 标称核数虚标或 cgroup 限速;<br>
+    ④ 小文件 fsync p99 &gt; 10ms ⇒ 存储被邻居抢占。<br>
+    建议把这个页面挂着观察 24 小时,抓高峰时段的偷取事件。
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let token = localStorage.getItem('vpsbench_tok') || '';
+$('token').value = token;
+$('token').onchange = e => { token = e.target.value.trim(); localStorage.setItem('vpsbench_tok', token); refreshLive(); };
+
+const api = p => p + (p.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+async function jget(p){ const r = await fetch(api(p), {cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status+': '+(await r.text()).slice(0,120)); return r.json(); }
+const pct = (a,p)=>{ if(!a.length) return 0; const s=[...a].sort((x,y)=>x-y); return s[Math.min(s.length-1,(s.length-1)*p/100|0)]; };
+const fmtMs = v => v>=1000 ? (v/1000).toFixed(2)+'s' : v>=100 ? v.toFixed(0)+'ms' : v.toFixed(2)+'ms';
+const fmtDur = s => { s|=0; const d=s/86400|0,h=s%86400/3600|0,m=s%3600/60|0; return (d?d+'天':'')+(h?h+'时':'')+m+'分'; };
+
+// ---------- 延迟 ----------
+async function pingTest(btn){
+  btn.disabled = true; const out = $('pingOut'); out.textContent = '运行中…';
+  const dur = (+$('pDur').value||15)*1000, iv = +$('pIv').value||100;
+  const stop = performance.now()+dur, lats = []; let errs = 0;
+  while(performance.now() < stop){
+    const t0 = performance.now();
+    try{ const r = await fetch(api('/api/ping'),{cache:'no-store'}); await r.arrayBuffer(); if(!r.ok) throw 0; lats.push(performance.now()-t0); }
+    catch(e){ errs++; }
+    const w = iv-(performance.now()-t0); if(w>0) await new Promise(r=>setTimeout(r,w));
+  }
+  if(!lats.length){ out.textContent = '全部失败 '+errs+' 次'; btn.disabled=false; return; }
+  const worst = [...lats].sort((a,b)=>b-a).slice(0,3).map(fmtMs).join(' / ');
+  out.innerHTML = `p50 <b>${fmtMs(pct(lats,50))}</b> · p95 ${fmtMs(pct(lats,95))} · p99 <b>${fmtMs(pct(lats,99))}</b> · 最大 ${fmtMs(pct(lats,100))} · 失败 ${errs} · 最差尖刺: ${worst}` +
+    (pct(lats,99) > pct(lats,50)*3 && pct(lats,99) > 50 ? ' <span style="color:var(--warn)">⚠ 周期性卡顿</span>' : '');
+  btn.disabled = false;
+}
+
+// ---------- 并发压测 ----------
+async function loadTest(btn){
+  btn.disabled = true; const out = $('loadOut');
+  const c = +$('lC').value||50, dur = (+$('lD').value||20)*1000;
+  const stop = performance.now()+dur; let total = 0, errs = 0; const lats = [];
+  const timer = setInterval(()=>{ out.textContent = `运行中… ${total} req / ${errs} err`; }, 400);
+  async function worker(){
+    while(performance.now() < stop){
+      const t0 = performance.now();
+      try{ const r = await fetch(api('/api/ping'),{cache:'no-store'}); await r.arrayBuffer(); if(!r.ok) throw 0; lats.push(performance.now()-t0); total++; }
+      catch(e){ errs++; }
+    }
+  }
+  await Promise.all(Array.from({length:c}, worker));
+  clearInterval(timer);
+  const er = (errs/(total+errs)*100).toFixed(2);
+  out.innerHTML = `<b>${(total/(dur/1000)).toFixed(0)}</b> req/s · p50 ${fmtMs(pct(lats,50))} · p99 <b>${fmtMs(pct(lats,99))}</b> · 最大 ${fmtMs(pct(lats,100))} · 错误率 ${er}%`;
+  btn.disabled = false;
+}
+
+// ---------- 包尺寸并发 ----------
+const humanB = n => n>=1024 && n%1024===0 ? (n/1024)+'K' : n>=1024 ? (n/1024).toFixed(1)+'K' : n+'B';
+async function pktOnce(size, c, durMs, onTick){
+  const stop = performance.now()+durMs; let total = 0, errs = 0; const lats = [];
+  async function worker(){
+    while(performance.now() < stop){
+      const t0 = performance.now();
+      try{ const r = await fetch(api('/api/echo?size='+size),{cache:'no-store'}); await r.arrayBuffer(); if(!r.ok) throw 0; lats.push(performance.now()-t0); total++; }
+      catch(e){ errs++; }
+    }
+  }
+  const t = onTick ? setInterval(()=>onTick(total, errs), 400) : 0;
+  await Promise.all(Array.from({length:c}, worker));
+  if(t) clearInterval(t);
+  return {size, total, errs, lats, sec: durMs/1000};
+}
+function pktRow(r){
+  const er = r.total+r.errs ? (r.errs/(r.total+r.errs)*100).toFixed(1) : '-';
+  return `${humanB(r.size)}\t${(r.total/r.sec).toFixed(0)} req/s\t${(r.total*r.size/1e6/r.sec).toFixed(1)} MB/s\tp50 ${fmtMs(pct(r.lats,50))}\tp99 ${fmtMs(pct(r.lats,99))}\tmax ${fmtMs(pct(r.lats,100))}\terr ${er}%`;
+}
+async function pktTest(size, btn){
+  btn.disabled = true;
+  const c = +$('kC').value||50, d = (+$('kD').value||8)*1000;
+  $('pktOut').style.display = 'block';
+  $('pktOut').textContent += `▶ ${humanB(size)} 包 × ${c} 并发 · ${d/1000}s\n`;
+  const r = await pktOnce(size, c, d, (t,e)=>{ $('pktStat').textContent = `运行中… ${t} req / ${e} err`; });
+  $('pktOut').textContent += pktRow(r) + '\n\n';
+  $('pktStat').textContent = '';
+  btn.disabled = false;
+}
+async function pktLadder(btn){
+  btn.disabled = true;
+  const c = +$('kC').value||50, d = (+$('kD').value||8)*1000;
+  $('pktOut').style.display = 'block';
+  $('pktOut').textContent = `▶ 阶梯测试 ${c} 并发,每档 ${d/1000}s\n包\tRPS\t吞吐\t延迟分位\n`;
+  const rows = [];
+  for(const s of [1024, 2048, 4096]){
+    $('pktStat').textContent = `运行中… ${humanB(s)}`;
+    const r = await pktOnce(s, c, d);
+    rows.push(r);
+    $('pktOut').textContent += pktRow(r) + '\n';
+  }
+  const f = rows[0].total/rows[0].sec, l = rows[rows.length-1].total/rows[rows.length-1].sec;
+  const an = l < f*0.35 ? 'RPS 随包增大急剧下降——带宽瓶颈,大包场景看吞吐而非 RPS'
+    : l > f*0.8 ? 'RPS 基本不随包大小变化——请求处理/CPU 瓶颈,包尺寸不是短板'
+    : 'RPS 中等下降——带宽与请求处理共同作用';
+  $('pktOut').textContent += `\n分析: ${an}(1K→4K: ${f.toFixed(0)} → ${l.toFixed(0)} req/s)\n\n`;
+  $('pktStat').textContent = '';
+  btn.disabled = false;
+}
+
+// ---------- 带宽 ----------
+async function bwTest(up, btn){
+  btn.disabled = true; const out = $('bwOut'); out.textContent = '运行中… 0 MB';
+  const dur = (+$('bD').value||8)*1000, c = +$('bC').value||4;
+  const stop = performance.now()+dur; let bytes = 0;
+  const timer = setInterval(()=>{ out.textContent = `运行中… ${(bytes/1e6).toFixed(0)} MB`; }, 500);
+  if(!up){
+    async function w(){
+      while(performance.now() < stop){
+        const r = await fetch(api('/api/stream?mb=50'),{cache:'no-store'});
+        if(r.body){ const rd = r.body.getReader(); while(true){ const {done,value} = await rd.read(); if(done) break; bytes += value.length; } }
+        else { bytes += (await r.arrayBuffer()).byteLength; }
+      }
+    }
+    await Promise.all(Array.from({length:c}, w));
+  } else {
+    const buf = new Uint8Array(8*1024*1024);
+    for(let i=0;i<buf.length;i+=65536) crypto.getRandomValues(buf.subarray(i, Math.min(i+65536, buf.length)));
+    const blob = new Blob([buf]);
+    async function w(){
+      while(performance.now() < stop){
+        const r = await fetch(api('/api/upload'),{method:'POST',body:blob});
+        await r.arrayBuffer(); bytes += blob.size;
+      }
+    }
+    await Promise.all(Array.from({length:c}, w));
+  }
+  clearInterval(timer);
+  const mbps = bytes/1e6/(dur/1000);
+  out.innerHTML = `<b>${mbps.toFixed(1)}</b> MB/s ≈ <b>${(mbps*8).toFixed(0)}</b> Mbps ${up?'↑ 上行':'↓ 下行'}`;
+  btn.disabled = false;
+}
+
+// ---------- 并发连接(受浏览器同源连接数限制) ----------
+async function connTest(btn){
+  btn.disabled = true; const out = $('connOut');
+  const target = +$('cN').value||100, hold = +$('cH').value||15;
+  const ac = new AbortController(); let ok = 0, fail = 0; const held = [];
+  async function one(){
+    try{ const r = await fetch(api('/api/hold?sec='+hold),{signal:ac.signal}); held.push(r); ok++; }
+    catch(e){ fail++; }
+  }
+  const ps = [];
+  for(let i=0;i<target;i++){
+    ps.push(one());
+    if(i%20===19){ out.textContent = `建立中… ${i+1}/${target} 成功 ${ok} 失败 ${fail}`; await new Promise(r=>setTimeout(r,200)); }
+  }
+  await Promise.allSettled(ps);
+  out.innerHTML = `成功保持 <b>${ok}</b> 条 · 失败 ${fail} 条,${hold}s 后释放(浏览器同源上限约 6 条,更大并发请用 CLI)`;
+  setTimeout(()=>{ ac.abort(); held.forEach(r=>{ try{ r.body && r.body.cancel(); }catch(e){} }); }, hold*1000+500);
+  btn.disabled = false;
+}
+
+// ---------- 一键诊断 ----------
+async function diagTest(btn){
+  btn.disabled = true; const out = $('srvOut');
+  out.textContent = '采样中(10 秒)…\n';
+  try{
+    const d = await jget('/api/diag?sec=10');
+    let txt = `【一键诊断】${d.sec}s 采样 ${d.samples} 点 | ${d.num_cpu} 核\n  🔺 最大负载来源: ${d.top}\n\n`;
+    txt += '指标'.padEnd(24)+'当前'.padStart(10)+'p50'.padStart(9)+'p95'.padStart(9)+'p99'.padStart(9)+'理想'.padStart(8)+'占理想%'.padStart(8)+'  状态\n';
+    for(const m of d.metrics){
+      const st = m.status==='ok' ? '✓' : m.status==='warn' ? '△ 偏高' : m.status==='bad' ? '⚠ 超标' : '·';
+      const ideal = m.ideal > 0 ? m.ideal : '参考';
+      const ratio = m.ideal > 0 ? m.ratio.toFixed(0)+'%' : '—';
+      const name = m.name + (m.unit ? '('+m.unit+')' : '');
+      txt += name.padEnd(24)+m.cur.toFixed(2).padStart(10)+m.p50.toFixed(2).padStart(9)+
+             m.p95.toFixed(2).padStart(9)+m.p99.toFixed(2).padStart(9)+String(ideal).padStart(8)+ratio.padStart(8)+'  '+st+'\n';
+    }
+    txt += `\n  GPU: ${d.gpu}\n  网络: 收 ${d.rx_kbps.toFixed(0)} KB/s | 发 ${d.tx_kbps.toFixed(0)} KB/s(参考)\n`;
+    txt += `  说明: 占理想% = 当前/理想上限;>80% 偏高,>100% 超标\n`;
+    out.textContent = txt;
+  }catch(e){ out.textContent = '✗ '+e.message+'\n'; }
+  btn.disabled = false;
+}
+
+// ---------- 服务端自测 ----------
+async function srvTest(kind, btn){
+  btn.disabled = true; const out = $('srvOut');
+  out.textContent = '运行中…(CPU/磁盘测试需数秒到数十秒)\n';
+  let txt = '';
+  try{
+    if(kind==='cpu'){
+      const r1 = await jget('/api/cpu?ms=1000'), r2 = await jget('/api/cpu?ms=1000');
+      const best = Math.max(r1.ops_per_sec, r2.ops_per_sec);
+      txt = `【单核算力】\n  第1轮 ${(r1.ops_per_sec/1e6).toFixed(2)} M ops/s\n  第2轮 ${(r2.ops_per_sec/1e6).toFixed(2)} M ops/s\n  最优  ${best/1e6>0?'':''}${(best/1e6).toFixed(2)} M ops/s\n`;
+    } else if(kind==='fill'){
+      out.textContent += '打满全部核中(约 8s)…\n';
+      const info = await jget('/api/info');
+      const r = await jget(`/api/fill?n=${info.num_cpu}&ms=8000`);
+      const ratio = r.effective_cores/r.req_cores*100;
+      txt = `【满载超售检测】打满 ${r.req_cores} 核 × ${(r.ms/1000).toFixed(1)}s\n  实际拿到 ${r.effective_cores.toFixed(2)} 核(${r.cpu_sec.toFixed(1)} CPU 秒)\n  核数兑现率 ${ratio.toFixed(1)}%\n  ${ratio>=95?'✓ 核数真实,基本独享':ratio>=85?'△ 轻度争抢,有邻居或配额略紧':'⚠ 明显超售/限速,标称核数兑现不足 85%'}\n`;
+    } else if(kind==='mem'){
+      const r = await jget('/api/mem?mb=512');
+      txt = `【内存带宽】512 MB 逐页写入 ${r.touch_ms.toFixed(0)} ms → ${r.mbps.toFixed(0)} MB/s\n`;
+    } else if(kind==='disk'){
+      out.textContent += '磁盘测试中…\n';
+      const r = await jget('/api/disk?mb=64&files=100');
+      txt = `【磁盘】顺序写 64MB ${r.write_ms.toFixed(0)}ms(${r.write_mbps.toFixed(0)} MB/s) · 大文件 fsync ${r.fsync_ms.toFixed(1)}ms\n  顺序读(含页缓存) ${r.read_ms.toFixed(0)}ms(${r.read_mbps.toFixed(0)} MB/s)\n  小文件 fsync(${r.small_files}个样本) p50 ${r.fsync.p50_ms.toFixed(2)}ms · p95 ${r.fsync.p95_ms.toFixed(2)}ms · p99 ${r.fsync.p99_ms.toFixed(2)}ms · 最大 ${r.fsync.max_ms.toFixed(2)}ms\n  ${r.fsync.p99_ms<3?'✓ 存储良好':r.fsync.p99_ms<10?'△ 一般:网络存储或有邻居 IO 争抢':'⚠ 存储延迟高:IO 被严重争抢'}\n`;
+    }
+  }catch(e){ txt = '✗ 失败: '+e.message+'\n'; }
+  out.textContent += txt;
+  btn.disabled = false;
+}
+
+// ---------- 实时监控 ----------
+async function refreshLive(){
+  if(!$('liveOn').checked) return;
+  let s;
+  try{ s = await jget('/api/stats?full=1'); }catch(e){ return; }
+  $('cSteal').textContent = `${s.steal_cur.toFixed(1)}% / 均 ${s.steal_avg.toFixed(1)}% / 峰 ${s.steal_max.toFixed(1)}%`;
+  $('cSteal').className = 'v ' + (s.steal_avg>=3||s.steal_max>=25 ? 'bad' : s.steal_avg>=1||s.steal_max>=10 ? 'warn' : 'ok');
+  $('cJit').textContent = `p99 ${fmtMs(s.jit_p99_ms)} / 峰 ${fmtMs(s.jit_max_ms)}`;
+  $('cJit').className = 'v ' + (s.jit_p99_ms>=30 ? 'bad' : s.jit_p99_ms>=10 ? 'warn' : 'ok');
+  $('cLoad').textContent = `${s.load[0].toFixed(2)} / ${s.load[1].toFixed(2)} / ${s.load[2].toFixed(2)}`;
+  $('cMem').textContent = `${s.mem_avail_mb} / ${s.mem_total_mb} MB`;
+  $('cHost').textContent = `${s.hostname} · ${s.num_cpu}核`;
+  $('cUp').textContent = fmtDur(s.uptime_sec);
+  const ev = s.spikes || [];
+  $('events').innerHTML = ev.length
+    ? ev.slice(-12).reverse().map(e=>`<div class="ev ${e.kind}">${new Date(e.t).toLocaleString('zh-CN')} — ${e.kind==='steal' ? 'CPU steal '+e.steal_pct+'%(CPU 被邻居偷走)' : '调度抖动 '+fmtMs(e.jitter_ms)+'(程序被延迟)'}</div>`).join('')
+    : '<div class="muted">暂无偷取事件 —— 目前宿主机很干净(继续挂机观察)</div>';
+  const v = $('stealVerdict');
+  if(s.steal_avg<1 && s.steal_max<10 && s.jit_p99_ms<10){ v.innerHTML = '<span style="color:var(--ok)">✓ 空闲期无偷取迹象</span> <span class="muted">(建议挂 24h 观察高峰期)</span>'; }
+  else if(s.steal_avg<3 && s.steal_max<25 && s.jit_p99_ms<30){ v.innerHTML = '<span style="color:var(--warn)">△ 轻度争抢:有邻居但影响可控</span>'; }
+  else { v.innerHTML = '<span style="color:var(--bad)">⚠ 偷取明显:宿主机超售严重,延迟敏感业务慎选</span>'; }
+  drawTL(s.samples || []);
+}
+
+function drawTL(samples){
+  const cv = $('tl'), ctx = cv.getContext('2d');
+  const W = cv.width = cv.clientWidth*2, H = cv.height = 300; // 2x 抗锯齿
+  ctx.clearRect(0,0,W,H);
+  const data = samples.slice(-120);
+  if(data.length < 2){ ctx.fillStyle = '#8b949e'; ctx.font = '24px sans-serif'; ctx.fillText('采集中,约 '+data.length+'s…', 24, H/2); return; }
+  const maxSteal = Math.max(5, ...data.map(s=>s.steal_pct))*1.2;
+  const maxJit   = Math.max(10, ...data.map(s=>s.jitter_max_ms))*1.2;
+  const x = i => 30 + i*(W-45)/(data.length-1);
+  // 网格
+  ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1; ctx.font = '18px monospace'; ctx.fillStyle = '#8b949e';
+  for(let g=0; g<=4; g++){
+    const y = 20 + g*(H-50)/4;
+    ctx.beginPath(); ctx.moveTo(30,y); ctx.lineTo(W-15,y); ctx.stroke();
+    ctx.fillText((maxSteal*(1-g/4)).toFixed(0)+'%', 0, y+6);
+  }
+  // steal 折线(红)
+  ctx.strokeStyle = '#f85149'; ctx.lineWidth = 3; ctx.beginPath();
+  data.forEach((s,i)=>{ const y = 20+(H-50)*(1-s.steal_pct/maxSteal); i?ctx.lineTo(x(i),y):ctx.moveTo(x(i),y); });
+  ctx.stroke();
+  // 抖动折线(黄)
+  ctx.strokeStyle = '#d29922'; ctx.lineWidth = 2; ctx.beginPath();
+  data.forEach((s,i)=>{ const y = 20+(H-50)*(1-s.jitter_max_ms/maxJit); i?ctx.lineTo(x(i),y):ctx.moveTo(x(i),y); });
+  ctx.stroke();
+}
+
+// ---------- 初始化 ----------
+(async function init(){
+  try{
+    const i = await jget('/api/info');
+    $('srvInfo').textContent = `${i.hostname} · ${i.num_cpu}核 · ${i.mem_avail_mb}/${i.mem_total_mb} MB`;
+  }catch(e){ $('srvInfo').textContent = '连接失败:检查令牌'; }
+})();
+refreshLive();
+setInterval(refreshLive, 2000);
+</script>
+</body>
+</html>
