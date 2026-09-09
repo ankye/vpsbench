@@ -53,7 +53,7 @@ func reorderArgs(fs *flag.FlagSet, args []string) []string {
 func targetURL(fs *flag.FlagSet) string {
 	rest := fs.Args()
 	if len(rest) != 1 {
-		fmt.Fprintln(os.Stderr, "错误: 需要且只需要一个 <url> 参数,例如 http://1.2.3.4:8300")
+		fmt.Fprintln(os.Stderr, T("Error: exactly one <url> argument is required, e.g. http://1.2.3.4:8300"))
 		os.Exit(2)
 	}
 	u := strings.TrimRight(rest[0], "/")
@@ -99,19 +99,19 @@ func getJSON(cl *http.Client, rawURL string, out any) error {
 
 func hdr(title string) { fmt.Printf("\n━━━ %s ━━━\n", title) }
 
-func kv(k string, v any) { fmt.Printf("  %-24s %v\n", k+":", v) }
+func kv(k string, v any) { fmt.Printf("  %-28s %v\n", T(k)+":", v) }
 
 func fail(err error) {
-	fmt.Println("  ✗ 失败:", err)
+	fmt.Println("  " + T("✗ failed:"), err)
 }
 
 // ---- ping: 延迟 / 抖动 ----
 
 func runPingCmd(args []string) {
 	fs := flag.NewFlagSet("ping", flag.ExitOnError)
-	d := fs.Duration("d", 30*time.Second, "测试时长")
-	iv := fs.Duration("i", 100*time.Millisecond, "发包间隔")
-	tok := fs.String("token", "", "服务端令牌")
+	d := fs.Duration("d", 30*time.Second, T("test duration"))
+	iv := fs.Duration("i", 100*time.Millisecond, T("send interval"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
@@ -119,7 +119,7 @@ func runPingCmd(args []string) {
 }
 
 func testPing(base string, d, iv time.Duration) {
-	hdr(fmt.Sprintf("延迟测试 %s(间隔 %s,共约 %.0f 个包)", d, iv, float64(d)/float64(iv)))
+	hdr(TF("Latency test %s (interval %s, ~%.0f probes)", d, iv, float64(d)/float64(iv)))
 	cl := newHTTPClient(1, 10*time.Second)
 	type rec struct {
 		t  time.Time
@@ -151,24 +151,24 @@ func testPing(base string, d, iv time.Duration) {
 	}
 	st := statsOf(vals)
 	if st.N == 0 {
-		fail(fmt.Errorf("无成功请求(错误 %d 次)", errs))
+		fail(fmt.Errorf(T("no successful requests (%d errors)"), errs))
 		return
 	}
-	kv("成功/失败", fmt.Sprintf("%d / %d", st.N, errs))
+	kv("ok / failed", fmt.Sprintf("%d / %d", st.N, errs))
 	kv("RTT p50 / p95 / p99", fmt.Sprintf("%s / %s / %s", fmtMs(st.P50), fmtMs(st.P95), fmtMs(st.P99)))
-	kv("RTT 最大", fmtMs(st.Max))
+	kv("RTT max", fmtMs(st.Max))
 	sp := append([]rec(nil), recs...)
 	sort.Slice(sp, func(a, b int) bool { return sp[a].ms > sp[b].ms })
 	n := 5
 	if len(sp) < n {
 		n = len(sp)
 	}
-	fmt.Println("  最差尖刺:")
+	fmt.Println("  " + T("worst spikes:"))
 	for i := 0; i < n; i++ {
 		fmt.Printf("    %s  %s\n", sp[i].t.Format("15:04:05.000"), fmtMs(sp[i].ms))
 	}
 	if st.P99 > st.P50*3 && st.P99 > 50 {
-		fmt.Println("  ⚠ p99 显著高于 p50:链路或对端存在周期性卡顿(可能是邻居偷取/网络抖动)")
+		fmt.Println("  " + T("⚠ p99 ≫ p50: periodic stalls on path or peer (neighbor steal / jitter)"))
 	}
 }
 
@@ -176,10 +176,10 @@ func testPing(base string, d, iv time.Duration) {
 
 func runLoadCmd(args []string) {
 	fs := flag.NewFlagSet("load", flag.ExitOnError)
-	c := fs.Int("c", 50, "并发数")
-	d := fs.Duration("d", 30*time.Second, "压测时长")
-	size := fs.Int("size", 0, "响应包大小(字节,0=极小 ping 包);如 1024/2048/4096")
-	tok := fs.String("token", "", "服务端令牌")
+	c := fs.Int("c", 50, T("concurrency"))
+	d := fs.Duration("d", 30*time.Second, T("test duration"))
+	size := fs.Int("size", 0, T("response packet size in bytes (0=tiny ping), e.g. 1024/2048/4096"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
@@ -262,23 +262,23 @@ func testLoad(base string, c int, d time.Duration, size int) loadResult {
 }
 
 func printLoadResult(r loadResult, base string) {
-	hdr(fmt.Sprintf("并发压测 %s(%d 并发 / %s)", base, r.Conns, r.Elapsed.Round(time.Millisecond)))
-	kv("总请求", fmt.Sprintf("%d(%.0f req/s)", r.Total, float64(r.Total)/r.Elapsed.Seconds()))
+	hdr(TF("Load test %s (%d conns / %s)", base, r.Conns, r.Elapsed.Round(time.Millisecond)))
+	kv("total requests", fmt.Sprintf("%d (%.0f req/s)", r.Total, float64(r.Total)/r.Elapsed.Seconds()))
 	errRate := 0.0
 	if r.Total+r.Errs > 0 {
 		errRate = float64(r.Errs) / float64(r.Total+r.Errs) * 100
 	}
-	kv("错误", fmt.Sprintf("%d(%.2f%%)", r.Errs, errRate))
+	kv("errors", fmt.Sprintf("%d (%.2f%%)", r.Errs, errRate))
 	if r.Latency.N > 0 {
-		kv("延迟 p50 / p95 / p99", fmt.Sprintf("%s / %s / %s", fmtMs(r.Latency.P50), fmtMs(r.Latency.P95), fmtMs(r.Latency.P99)))
-		kv("延迟最大", fmtMs(r.Latency.Max))
+		kv("latency p50 / p95 / p99", fmt.Sprintf("%s / %s / %s", fmtMs(r.Latency.P50), fmtMs(r.Latency.P95), fmtMs(r.Latency.P99)))
+		kv("latency max", fmtMs(r.Latency.Max))
 	}
 	if r.Size > 0 && r.Total > 0 {
 		mbps := float64(r.Total) * float64(r.Size) / 1e6 / r.Elapsed.Seconds()
-		kv("吞吐", fmt.Sprintf("%.1f MB/s(≈ %.0f Mbps)", mbps, mbps*8))
+		kv("throughput", TF("%.1f MB/s (≈ %.0f Mbps)", mbps, mbps*8))
 	}
 	if r.SrvSelf > 0 || r.SrvSteal > 0 {
-		kv("服务端视角", fmt.Sprintf("CPU %.0f%% | steal %.1f%%", r.SrvSelf, r.SrvSteal))
+		kv("server view", fmt.Sprintf("CPU %.0f%% | steal %.1f%%", r.SrvSelf, r.SrvSteal))
 	}
 }
 
@@ -297,10 +297,10 @@ func humanBytes(n int) string {
 
 func runPacketCmd(args []string) {
 	fs := flag.NewFlagSet("packet", flag.ExitOnError)
-	c := fs.Int("c", 100, "并发数")
-	d := fs.Duration("d", 10*time.Second, "每个包尺寸的测试时长")
-	sizes := fs.String("sizes", "1024,2048,4096", "逗号分隔的包大小(字节,≤65536)")
-	tok := fs.String("token", "", "服务端令牌")
+	c := fs.Int("c", 100, T("concurrency"))
+	d := fs.Duration("d", 10*time.Second, T("duration per packet size"))
+	sizes := fs.String("sizes", "1024,2048,4096", T("comma-separated packet sizes in bytes (≤65536)"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
@@ -313,11 +313,12 @@ func runPacketCmd(args []string) {
 		}
 	}
 	if len(ss) == 0 {
-		fmt.Fprintln(os.Stderr, "错误: sizes 参数无效,例如 -sizes 1024,2048,4096")
+		fmt.Fprintln(os.Stderr, T("Error: invalid sizes, e.g. -sizes 1024,2048,4096"))
 		os.Exit(2)
 	}
-	hdr(fmt.Sprintf("包尺寸并发阶梯(%d 并发 × %s/档)", *c, d))
-	fmt.Printf("  %-6s %12s %14s %10s %10s %10s %8s\n", "包", "RPS", "吞吐", "p50", "p99", "最大", "错误%")
+	hdr(TF("Packet-size concurrency ladder (%d conns × %s each)", *c, d))
+	fmt.Printf("  %-6s %12s %14s %10s %10s %10s %8s\n",
+		T("pkt"), "RPS", T("throughput"), "p50", "p99", T("max"), T("err%"))
 	var first, last float64
 	for i, n := range ss {
 		fmt.Printf("  %-6s ", humanBytes(n))
@@ -329,7 +330,7 @@ func runPacketCmd(args []string) {
 			er = float64(r.Errs) / float64(r.Total+r.Errs) * 100
 		}
 		if r.Latency.N == 0 {
-			fmt.Printf("%12s %14s   —— 全部失败 ——\n", "-", "-")
+			fmt.Printf("%12s %14s   %s\n", "-", "-", T("—— all failed ——"))
 			continue
 		}
 		fmt.Printf("%12.0f %10.1fMB/s %10s %10s %10s %7.2f%%\n",
@@ -343,11 +344,11 @@ func runPacketCmd(args []string) {
 		fmt.Println()
 		switch {
 		case last < first*0.35:
-			fmt.Printf("  分析: RPS 随包增大急剧下降(%.0f→%.0f)——带宽/内核缓冲瓶颈,大包场景看吞吐而非 RPS\n", first, last)
+			fmt.Println("  " + TF("Analysis: RPS drops sharply with size (%.0f→%.0f) — bandwidth/kernel-buffer bound; watch throughput for big packets, not RPS", first, last))
 		case last > first*0.8:
-			fmt.Printf("  分析: RPS 基本不随包大小变化(%.0f→%.0f)——请求处理/CPU 瓶颈,包尺寸不是短板\n", first, last)
+			fmt.Println("  " + TF("Analysis: RPS barely changes with size (%.0f→%.0f) — request-processing/CPU bound; packet size is not the bottleneck", first, last))
 		default:
-			fmt.Printf("  分析: RPS 中等下降(%.0f→%.0f)——带宽与请求处理共同作用\n", first, last)
+			fmt.Println("  " + TF("Analysis: RPS drops moderately (%.0f→%.0f) — bandwidth and processing both contribute", first, last))
 		}
 	}
 }
@@ -356,15 +357,15 @@ func runPacketCmd(args []string) {
 
 func runConnCmd(args []string) {
 	fs := flag.NewFlagSet("conn", flag.ExitOnError)
-	c := fs.Int("c", 500, "目标并发连接数")
-	hold := fs.Duration("hold", 30*time.Second, "每个连接保持时长")
-	step := fs.Int("step", 50, "每波新增连接数")
-	tok := fs.String("token", "", "服务端令牌")
+	c := fs.Int("c", 500, T("target concurrent connections"))
+	hold := fs.Duration("hold", 30*time.Second, T("hold time per connection"))
+	step := fs.Int("step", 50, T("new connections per wave"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
 
-	hdr(fmt.Sprintf("最大并发连接测试(目标 %d,每波 +%d,保持 %s)", *c, *step, *hold))
+	hdr(TF("Max concurrent connections (target %d, +%d per wave, hold %s)", *c, *step, *hold))
 	cl := newHTTPClient(*c+16, 30*time.Second)
 	ctxAll, cancelAll := context.WithCancel(context.Background())
 	defer cancelAll()
@@ -396,17 +397,17 @@ func runConnCmd(args []string) {
 			}()
 		}
 		opened += wave
-		fmt.Printf("  已发起 %4d,当前成功 %d,失败 %d\n", opened, ok.Load(), failN.Load())
+		fmt.Print(TF("  launched %4d, ok %d, failed %d\n", opened, ok.Load(), failN.Load()))
 		time.Sleep(2 * time.Second)
 	}
-	fmt.Printf("  全部发起完毕,保持 %s 后释放...\n", *hold)
+	fmt.Println("  " + TF("all launched, holding %s then releasing...", *hold))
 	wg.Wait()
-	kv("成功建立", ok.Load())
-	kv("失败", failN.Load())
+	kv("established", ok.Load())
+	kv("failed", failN.Load())
 	if ok.Load() >= int64(*c) {
-		fmt.Println("  ✓ 达到目标并发数,可加大 -c 继续探测上限")
+		fmt.Println("  " + T("✓ reached target; raise -c to probe the ceiling"))
 	} else {
-		fmt.Println("  ✗ 未达目标:可能受 conntrack / 文件描述符 / 防火墙限制")
+		fmt.Println("  " + T("✗ below target: conntrack / fd limit / firewall?"))
 	}
 }
 
@@ -414,10 +415,10 @@ func runConnCmd(args []string) {
 
 func runBWCmd(args []string) {
 	fs := flag.NewFlagSet("bw", flag.ExitOnError)
-	d := fs.Duration("d", 10*time.Second, "测试时长")
-	c := fs.Int("c", 4, "并行流数")
-	up := fs.Bool("up", false, "测上行(默认测下行)")
-	tok := fs.String("token", "", "服务端令牌")
+	d := fs.Duration("d", 10*time.Second, T("test duration"))
+	c := fs.Int("c", 4, T("parallel streams"))
+	up := fs.Bool("up", false, T("test upload (default: download)"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
@@ -425,11 +426,11 @@ func runBWCmd(args []string) {
 }
 
 func testBW(base string, d time.Duration, c int, up bool) float64 {
-	dir := "下行"
+	dir := T("Download")
 	if up {
-		dir = "上行"
+		dir = T("Upload")
 	}
-	hdr(fmt.Sprintf("%s带宽测试(%d 并行流 / %s)", dir, c, d))
+	hdr(TF("%s bandwidth test (%d streams / %s)", dir, c, d))
 	cl := newHTTPClient(c, 60*time.Second)
 	var total atomic.Int64
 	var wg sync.WaitGroup
@@ -470,8 +471,8 @@ func testBW(base string, d time.Duration, c int, up bool) float64 {
 	}
 	wg.Wait()
 	mbps := float64(total.Load()) / 1e6 / d.Seconds()
-	kv("总流量", fmt.Sprintf("%.1f MB", float64(total.Load())/1e6))
-	kv("吞吐", fmt.Sprintf("%.1f MB/s(≈ %.0f Mbps)", mbps, mbps*8))
+	kv("total transferred", TF("%.1f MB", float64(total.Load())/1e6))
+	kv("throughput", TF("%.1f MB/s (≈ %.0f Mbps)", mbps, mbps*8))
 	return mbps
 }
 
@@ -479,9 +480,9 @@ func testBW(base string, d time.Duration, c int, up bool) float64 {
 
 func runCPUCmd(args []string) {
 	fs := flag.NewFlagSet("cpu", flag.ExitOnError)
-	ms := fs.Int("ms", 2000, "每轮时长")
-	runs := fs.Int("runs", 3, "轮数,取最优")
-	tok := fs.String("token", "", "服务端令牌")
+	ms := fs.Int("ms", 2000, T("ms per run"))
+	runs := fs.Int("runs", 3, T("runs, keep best"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
@@ -489,7 +490,7 @@ func runCPUCmd(args []string) {
 }
 
 func testCPU(base string, ms, runs int) float64 {
-	hdr(fmt.Sprintf("单核算力测试(%d 轮 × %dms,取最优)", runs, ms))
+	hdr(TF("Single-core benchmark (%d runs × %dms, best)", runs, ms))
 	cl := newHTTPClient(2, 2*time.Minute)
 	best := 0.0
 	for i := 1; i <= runs; i++ {
@@ -498,20 +499,20 @@ func testCPU(base string, ms, runs int) float64 {
 			fail(err)
 			return 0
 		}
-		fmt.Printf("  第 %d 轮: %.2f M ops/s(墙钟 %s)\n", i, cr.OpsPerSec/1e6, fmtMs(cr.Ms))
+		fmt.Print(TF("  run #%d: %.2f M ops/s (wall %s)\n", i, cr.OpsPerSec/1e6, fmtMs(cr.Ms)))
 		if cr.OpsPerSec > best {
 			best = cr.OpsPerSec
 		}
 	}
-	kv("单核算力", fmt.Sprintf("%.2f M ops/s", best/1e6))
+	kv("single-core", TF("%.2f M ops/s", best/1e6))
 	return best
 }
 
 func runFillCmd(args []string) {
 	fs := flag.NewFlagSet("fill", flag.ExitOnError)
-	n := fs.Int("n", 0, "打满核数(0=服务端全部核)")
-	ms := fs.Int("ms", 5000, "持续时长")
-	tok := fs.String("token", "", "服务端令牌")
+	n := fs.Int("n", 0, T("cores to fill (0=all)"))
+	ms := fs.Int("ms", 5000, T("duration in ms"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
@@ -529,38 +530,38 @@ func testFill(base string, n, ms int, singleCoreOps float64) *fillResp {
 	if n <= 0 {
 		n = info.NumCPU
 	}
-	hdr(fmt.Sprintf("满载测试:打满 %d 核 × %dms(服务端标称 %d 核)", n, ms, info.NumCPU))
-	fmt.Printf("  运行中...\n")
+	hdr(TF("Full-load test: fill %d cores × %dms (server has %d cores)", n, ms, info.NumCPU))
+	fmt.Print("  " + T("  running...\n"))
 	var fr fillResp
 	if err := getJSON(cl, withTok(base+fmt.Sprintf("/api/fill?n=%d&ms=%d", n, ms)), &fr); err != nil {
 		fail(err)
 		return nil
 	}
 	ratio := fr.EffectiveCores / float64(n)
-	kv("实际拿到", fmt.Sprintf("%.2f 核 × %.1fs = %.2f CPU 秒", fr.EffectiveCores, fr.Ms/1000, fr.CPUSec))
-	kv("核数兑现率", fmt.Sprintf("%.1f%%(%d 核里实际可用 %.2f 核)", ratio*100, n, fr.EffectiveCores))
+	kv("actually got", TF("%.2f cores × %.1fs = %.2f CPU-seconds", fr.EffectiveCores, fr.Ms/1000, fr.CPUSec))
+	kv("core delivery", TF("%.1f%% (%.2f of %d cores actually usable)", ratio*100, fr.EffectiveCores, n))
 	if singleCoreOps > 0 && fr.OpsPerCorePerSec > 0 {
 		decay := fr.OpsPerCorePerSec / singleCoreOps * 100
-		kv("满载单核衰减", fmt.Sprintf("%.0f%%(空载 %.1f M/s → 满载 %.1f M/s)", decay, singleCoreOps/1e6, fr.OpsPerCorePerSec/1e6))
+		kv("per-core decay at full load", TF("%.0f%% (idle %.1f M/s → loaded %.1f M/s)", decay, singleCoreOps/1e6, fr.OpsPerCorePerSec/1e6))
 	}
 	switch {
 	case ratio >= 0.95:
-		fmt.Println("  ✓ 核数真实:基本独享,无超售/限速")
+		fmt.Println("  " + T("✓ real cores: basically dedicated, no oversell/throttle"))
 	case ratio >= 0.85:
-		fmt.Println("  △ 轻度争抢:有邻居或 cgroup 配额略紧")
+		fmt.Println("  " + T("△ mild contention: neighbors or tight cgroup quota"))
 	case ratio >= 0.7:
-		fmt.Println("  ⚠ 明显超售:标称核数兑现不足 85%")
+		fmt.Println("  " + T("⚠ clear oversell: less than 85% of advertised cores"))
 	default:
-		fmt.Println("  ✗ 严重超售或强限速:兑现不足 70%,共享宿主机无疑")
+		fmt.Println("  " + T("✗ severe oversell or hard throttle: <70%, definitely shared host"))
 	}
 	return &fr
 }
 
 func runDiskCmd(args []string) {
 	fs := flag.NewFlagSet("disk", flag.ExitOnError)
-	mb := fs.Int("mb", 64, "顺序读写 MB")
-	files := fs.Int("files", 100, "小文件个数(fsync 延迟样本)")
-	tok := fs.String("token", "", "服务端令牌")
+	mb := fs.Int("mb", 64, T("sequential MB"))
+	files := fs.Int("files", 100, T("small file count (fsync samples)"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
@@ -568,27 +569,27 @@ func runDiskCmd(args []string) {
 }
 
 func testDisk(base string, mb, files int) *diskResp {
-	hdr(fmt.Sprintf("磁盘测试(顺序 %d MB + %d 个小文件 fsync)", mb, files))
+	hdr(TF("Disk test (seq %d MB + %d small-file fsync)", mb, files))
 	cl := newHTTPClient(2, 5*time.Minute)
 	var dr diskResp
 	if err := getJSON(cl, withTok(base+fmt.Sprintf("/api/disk?mb=%d&files=%d", mb, files)), &dr); err != nil {
 		fail(err)
 		return nil
 	}
-	kv("顺序写", fmt.Sprintf("%s(%.0f MB/s)", fmtMs(dr.WriteMs), dr.WriteMBps))
-	kv("大文件 fsync", fmtMs(dr.FsyncMs))
-	kv("顺序读(含缓存)", fmt.Sprintf("%s(%.0f MB/s)", fmtMs(dr.ReadMs), dr.ReadMBps))
-	kv("小文件 fsync p50/p95/p99", fmt.Sprintf("%s / %s / %s", fmtMs(dr.Fsync.P50), fmtMs(dr.Fsync.P95), fmtMs(dr.Fsync.P99)))
-	kv("小文件 fsync 最大", fmtMs(dr.Fsync.Max))
+	kv("sequential write", TF("%s (%.0f MB/s)", fmtMs(dr.WriteMs), dr.WriteMBps))
+	kv("large-file fsync", fmtMs(dr.FsyncMs))
+	kv("sequential read (cached)", TF("%s (%.0f MB/s)", fmtMs(dr.ReadMs), dr.ReadMBps))
+	kv("small-file fsync p50/p95/p99", fmt.Sprintf("%s / %s / %s", fmtMs(dr.Fsync.P50), fmtMs(dr.Fsync.P95), fmtMs(dr.Fsync.P99)))
+	kv("small-file fsync max", fmtMs(dr.Fsync.Max))
 	switch {
 	case dr.Fsync.P99 < 1:
-		fmt.Println("  ✓ 存储优秀(本地 NVMe 级)")
+		fmt.Println("  " + T("✓ excellent storage (local NVMe class)"))
 	case dr.Fsync.P99 < 3:
-		fmt.Println("  ✓ 存储良好")
+		fmt.Println("  " + T("✓ good storage"))
 	case dr.Fsync.P99 < 10:
-		fmt.Println("  △ 存储一般:网络存储或邻居 I/O 争抢")
+		fmt.Println("  " + T("△ mediocre: network storage or neighbor I/O contention"))
 	default:
-		fmt.Println("  ⚠ 存储延迟高:严重 I/O 争抢或超售,建库/写日志会痛")
+		fmt.Println("  " + T("⚠ high storage latency: heavy I/O contention or oversell — painful for DB/logs"))
 	}
 	return &dr
 }
@@ -597,8 +598,8 @@ func testDisk(base string, mb, files int) *diskResp {
 
 func runStealCmd(args []string) {
 	fs := flag.NewFlagSet("steal", flag.ExitOnError)
-	watch := fs.Bool("w", false, "持续观察模式,每 5s 刷新一行")
-	tok := fs.String("token", "", "服务端令牌")
+	watch := fs.Bool("w", false, T("watch mode, refresh every 5s"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
@@ -612,35 +613,36 @@ func runStealCmd(args []string) {
 		printSnapshot(&s, true)
 		return
 	}
-	fmt.Println("持续观察中(Ctrl+C 退出)...")
+	fmt.Println(T("watching... (Ctrl+C to quit)"))
 	for {
 		var s StatsSnapshot
 		if err := getJSON(cl, withTok(base+"/api/stats"), &s); err != nil {
-			fmt.Println("  拉取失败:", err)
+			fmt.Println(T("  fetch failed:"), err)
 		} else {
-			fmt.Printf("[%s] steal: cur %.1f%% avg %.1f%% max %.1f%% | 抖动 p99 %s max %s | 负载 %.2f\n",
+			fmt.Print(TF("[%s] steal: cur %.1f%% avg %.1f%% max %.1f%% | jitter p99 %s max %s | load %.2f\n",
 				time.Now().Format("15:04:05"), s.StealCur, s.StealAvg, s.StealMax,
-				fmtMs(s.JitP99), fmtMs(s.JitMax), s.Load[0])
+				fmtMs(s.JitP99), fmtMs(s.JitMax), s.Load[0]))
 		}
 		time.Sleep(5 * time.Second)
 	}
 }
 
 func printSnapshot(s *StatsSnapshot, detail bool) {
-	hdr("服务端资源偷取报告(共享宿主机检测)")
-	kv("主机", fmt.Sprintf("%s | %d 核 | 监控已运行 %s", s.Hostname, s.NumCPU, (time.Duration(s.UptimeSec * float64(time.Second))).Round(time.Second)))
-	kv("内存", fmt.Sprintf("%d MB 可用 / %d MB", s.MemAvailMB, s.MemTotalMB))
-	kv("负载(1/5/15m)", fmt.Sprintf("%.2f / %.2f / %.2f", s.Load[0], s.Load[1], s.Load[2]))
+	hdr(T("Server steal report (shared-host detection)"))
+	kv("host", TF("%s | %d cores | monitoring for %s", s.Hostname, s.NumCPU,
+		(time.Duration(s.UptimeSec * float64(time.Second))).Round(time.Second)))
+	kv("memory", TF("%d MB avail / %d MB", s.MemAvailMB, s.MemTotalMB))
+	kv("load (1/5/15m)", fmt.Sprintf("%.2f / %.2f / %.2f", s.Load[0], s.Load[1], s.Load[2]))
 	fmt.Println()
-	kv("CPU steal%", fmt.Sprintf("当前 %.1f | 平均 %.1f | p95 %.1f | 最大 %.1f", s.StealCur, s.StealAvg, s.StealP95, s.StealMax))
-	kv(fmt.Sprintf("调度抖动(基准 %dms)", s.JitInterval), fmt.Sprintf("p50 %s | p95 %s | p99 %s | 最大 %s",
+	kv("CPU steal%", TF("cur %.1f | avg %.1f | p95 %.1f | max %.1f", s.StealCur, s.StealAvg, s.StealP95, s.StealMax))
+	kv(TF("sched jitter (base %dms)", s.JitInterval), TF("p50 %s | p95 %s | p99 %s | max %s",
 		fmtMs(s.JitP50), fmtMs(s.JitP95), fmtMs(s.JitP99), fmtMs(s.JitMax)))
-	kv("抖动超限次数", fmt.Sprintf(">10ms: %d | >50ms: %d | >100ms: %d", s.JitOver10, s.JitOver50, s.JitOver100))
+	kv("jitter over-limit count", TF(">10ms: %d | >50ms: %d | >100ms: %d", s.JitOver10, s.JitOver50, s.JitOver100))
 	if s.StealMax == 0 && s.StealAvg == 0 && s.StealP95 == 0 && s.SampleCount > 60 {
-		fmt.Println("  ℹ steal 恒为 0:部分虚拟化(如 OpenVZ/LXC)看不到 steal,请以调度抖动为准")
+		fmt.Println("  " + T("ℹ steal always 0: some virtualization (OpenVZ/LXC) hides steal — judge by scheduling jitter"))
 	}
 	if detail && len(s.Spikes) > 0 {
-		fmt.Println("  偷取事件(最近):")
+		fmt.Println("  " + T("steal/jitter events (recent):"))
 		start := 0
 		if len(s.Spikes) > 8 {
 			start = len(s.Spikes) - 8
@@ -649,12 +651,12 @@ func printSnapshot(s *StatsSnapshot, detail bool) {
 			if e.Kind == "steal" {
 				fmt.Printf("    %s  steal %.1f%%\n", e.T.Format("01-02 15:04:05"), e.StealPct)
 			} else {
-				fmt.Printf("    %s  抖动 %s\n", e.T.Format("01-02 15:04:05"), fmtMs(e.JitterMs))
+				fmt.Print(TF("    %s  jitter %s\n", e.T.Format("01-02 15:04:05"), fmtMs(e.JitterMs)))
 			}
 		}
 	}
 	if s.SelfBusy() {
-		fmt.Println("  ℹ 近期服务端自身 CPU 较高(可能刚跑过压测),抖动/负载数据会偏高,空闲时复测更准")
+		fmt.Println("  " + T("ℹ server's own CPU was busy recently (load test?): jitter/load inflated, retest when idle"))
 	}
 	verdictSteal(s)
 }
@@ -678,11 +680,11 @@ func verdictSteal(s *StatsSnapshot) {
 	fmt.Println()
 	switch {
 	case s.StealAvg < 1 && s.StealMax < 10 && s.JitP99 < 10:
-		fmt.Println("  结论 ✓ 空闲期无偷取迹象:宿主机不挤(建议连续观察 24h 复核高峰时段)")
+		fmt.Println("  " + T("Verdict ✓ no steal while idle: host not crowded (watch 24h to confirm peak hours)"))
 	case s.StealAvg < 3 && s.StealMax < 25 && s.JitP99 < 30:
-		fmt.Println("  结论 △ 轻度争抢:有邻居但影响可控")
+		fmt.Println("  " + T("Verdict △ mild contention: neighbors exist but impact is contained"))
 	default:
-		fmt.Println("  结论 ⚠ 偷取明显:宿主机超售严重,延迟敏感业务慎选")
+		fmt.Println("  " + T("Verdict ⚠ obvious steal: heavily oversold host — think twice for latency-sensitive work"))
 	}
 }
 
@@ -690,12 +692,12 @@ func verdictSteal(s *StatsSnapshot) {
 
 func runAllCmd(args []string) {
 	fs := flag.NewFlagSet("all", flag.ExitOnError)
-	c := fs.Int("c", 50, "并发压测连接数")
-	ld := fs.Duration("ld", 20*time.Second, "压测时长")
-	pd := fs.Duration("pd", 15*time.Second, "延迟测试时长")
-	bd := fs.Duration("bd", 8*time.Second, "带宽测试时长")
-	fd := fs.Int("fill-ms", 8000, "满载测试时长")
-	tok := fs.String("token", "", "服务端令牌")
+	c := fs.Int("c", 50, T("load-test connections"))
+	ld := fs.Duration("ld", 20*time.Second, T("load-test duration"))
+	pd := fs.Duration("pd", 15*time.Second, T("latency-test duration"))
+	bd := fs.Duration("bd", 8*time.Second, T("bandwidth-test duration"))
+	fd := fs.Int("fill-ms", 8000, T("full-load test duration in ms"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
@@ -703,19 +705,19 @@ func runAllCmd(args []string) {
 	cl := newHTTPClient(4, 15*time.Second)
 	var info infoResp
 	if err := getJSON(cl, withTok(base+"/api/info"), &info); err != nil {
-		fmt.Println("✗ 连接服务端失败:", err)
-		fmt.Println("  检查:服务端是否启动、端口是否放行(ufw allow 8300)、-token 是否匹配")
+		fmt.Println(TF("✗ cannot reach server: %v", err))
+		fmt.Println(T("  check: server running? port open (ufw allow 8300)? -token match?"))
 		os.Exit(1)
 	}
 	fmt.Printf("╔══════════════════════════════════════════════╗\n")
-	fmt.Printf("║        vpsbench 全套测试 → %s\n", base)
+	fmt.Printf("║        vpsbench full suite → %s\n", base)
 	fmt.Printf("╚══════════════════════════════════════════════╝\n")
-	hdr("被测机器信息")
-	kv("主机名", info.Hostname)
-	kv("CPU", fmt.Sprintf("%d 核", info.NumCPU))
-	kv("内存", fmt.Sprintf("%d MB / %d MB", info.MemAvailMB, info.MemTotalMB))
-	kv("内核", info.Kernel)
-	kv("开机时长", (time.Duration(info.UptimeSec * float64(time.Second))).Round(time.Minute))
+	hdr(T("target machine info"))
+	kv("hostname", info.Hostname)
+	kv("CPU", TF("%d cores", info.NumCPU))
+	kv("memory", fmt.Sprintf("%d MB / %d MB", info.MemAvailMB, info.MemTotalMB))
+	kv("kernel", info.Kernel)
+	kv("uptime", (time.Duration(info.UptimeSec * float64(time.Second))).Round(time.Minute))
 
 	single := testCPU(base, 1000, 2)
 	fr := testFill(base, 0, *fd, single)
@@ -734,7 +736,7 @@ func runAllCmd(args []string) {
 	fmt.Println()
 	line := strings.Repeat("─", 52)
 	fmt.Println("┌" + line + "┐")
-	fmt.Println("│ 服务器信息汇总 All-in-One" + strings.Repeat(" ", 25) + "│")
+	fmt.Println("│  " + T("Server summary All-in-One") + strings.Repeat(" ", 24) + "│")
 	fmt.Println("└" + line + "┘")
 	mark := func(ok bool) string {
 		if ok {
@@ -742,32 +744,33 @@ func runAllCmd(args []string) {
 		}
 		return "?"
 	}
-	fmt.Printf("  主机       : %s | %d 核 | %d/%d MB 内存\n", info.Hostname, info.NumCPU, info.MemAvailMB, info.MemTotalMB)
-	fmt.Printf("  系统       : %s | 开机 %s\n", info.Kernel, (time.Duration(info.UptimeSec * float64(time.Second))).Round(time.Minute))
-	fmt.Printf("  负载       : %.2f / %.2f / %.2f\n", snap.Load[0], snap.Load[1], snap.Load[2])
-	fmt.Printf("  CPU 算力   : 单核 %.2f M ops/s %s\n", single/1e6, mark(single > 0))
+	fmt.Printf("  %-12s: %s | %s | %d/%d MB\n", T("host"), info.Hostname, TF("%d cores", info.NumCPU), info.MemAvailMB, info.MemTotalMB)
+	fmt.Printf("  %-12s: %s | %s %s\n", T("system"), info.Kernel, T("uptime"),
+		(time.Duration(info.UptimeSec * float64(time.Second))).Round(time.Minute))
+	fmt.Printf("  %-12s: %.2f / %.2f / %.2f\n", T("load (1/5/15m)"), snap.Load[0], snap.Load[1], snap.Load[2])
+	fmt.Print(TF("single-core %.2f M ops/s %s\n", single/1e6, mark(single > 0)))
 	if fr != nil {
 		ratio := fr.EffectiveCores / float64(fr.ReqCores) * 100
-		fmt.Printf("  核数兑现   : %d 核实际 %.2f 核(%.0f%%) %s\n", fr.ReqCores, fr.EffectiveCores, ratio,
-			map[bool]string{true: "✓", false: "⚠"}[ratio >= 85])
+		fmt.Print(TF("core delivery: %d advertised → %.2f actual (%.0f%%) %s\n", fr.ReqCores, fr.EffectiveCores, ratio,
+			map[bool]string{true: "✓", false: "⚠"}[ratio >= 85]))
 	}
 	if dr != nil {
-		fmt.Printf("  磁盘       : 写 %.0f MB/s | 小文件 fsync p99 %s %s\n", dr.WriteMBps, fmtMs(dr.Fsync.P99),
-			map[bool]string{true: "✓", false: "⚠"}[dr.Fsync.P99 < 10])
+		fmt.Print(TF("disk: write %.0f MB/s | small-file fsync p99 %s %s\n", dr.WriteMBps, fmtMs(dr.Fsync.P99),
+			map[bool]string{true: "✓", false: "⚠"}[dr.Fsync.P99 < 10]))
 	}
-	fmt.Printf("  偷取 steal : 平均 %.1f%% | 峰值 %.1f%% %s\n", snap.StealAvg, snap.StealMax,
-		mark(snap.StealAvg < 3 && snap.StealMax < 25))
-	fmt.Printf("  调度抖动   : p99 %s | 峰值 %s %s\n", fmtMs(snap.JitP99), fmtMs(snap.JitMax),
-		mark(snap.JitP99 < 30))
+	fmt.Print(TF("steal: avg %.1f%% | peak %.1f%% %s\n", snap.StealAvg, snap.StealMax,
+		mark(snap.StealAvg < 3 && snap.StealMax < 25)))
+	fmt.Print(TF("sched jitter: p99 %s | peak %s %s\n", fmtMs(snap.JitP99), fmtMs(snap.JitMax),
+		mark(snap.JitP99 < 30)))
 	if res.Latency.N > 0 {
-		fmt.Printf("  网络       : RTT p50 %s | p99 %s\n", fmtMs(res.Latency.P50), fmtMs(res.Latency.P99))
+		fmt.Print(TF("network: RTT p50 %s | p99 %s\n", fmtMs(res.Latency.P50), fmtMs(res.Latency.P99)))
 		errRate := float64(res.Errs) / float64(res.Total+res.Errs) * 100
-		fmt.Printf("  并发       : %.0f req/s @ %d 并发 | 错误 %.2f%% %s\n",
-			float64(res.Total)/res.Elapsed.Seconds(), res.Conns, errRate, mark(errRate < 1))
+		fmt.Print(TF("concurrency: %.0f req/s @ %d conns | errors %.2f%% %s\n",
+			float64(res.Total)/res.Elapsed.Seconds(), res.Conns, errRate, mark(errRate < 1)))
 	}
-	fmt.Printf("  下行带宽   : %.1f MB/s(≈%.0f Mbps)%s\n", bw, bw*8, mark(bw > 10))
+	fmt.Print(TF("downlink: %.1f MB/s (≈%.0f Mbps)%s\n", bw, bw*8, mark(bw > 10)))
 	fmt.Println()
-	fmt.Println("  建议: `vpsbench steal <url> -w` 挂 24h 抓高峰偷取;")
-	fmt.Println("        `vpsbench packet <url> -c 100` 测 1K/2K/4K 包并发;")
-	fmt.Println("        `vpsbench conn <url> -c 1000` 探最大并发连接数。")
+	fmt.Println(T("Tips: run `vpsbench steal <url> -w` for 24h to catch peak-hour steal;"))
+	fmt.Println(T("      `vpsbench packet <url> -c 100` for 1K/2K/4K packet concurrency;"))
+	fmt.Println(T("      `vpsbench conn <url> -c 1000` to probe max concurrent connections."))
 }

@@ -14,6 +14,7 @@ import (
 
 // 一键诊断:采样 CPU/内存/磁盘IO/socket/负载/GPU 等指标,
 // 给出 p50/p95/p99、理想上限对比(占理想%)、以及"哪里负载最高"的结论。
+// 指标用稳定的 key 标识(英文),CLI/网页各自按语言渲染标签。
 
 type diskStat struct {
 	reads, writes, msRead, msWrite, msIO uint64
@@ -113,7 +114,7 @@ func readCtx() uint64 {
 func gpuInfo() string {
 	path, err := exec.LookPath("nvidia-smi")
 	if err != nil {
-		return "未检测到(无 nvidia-smi;云服务器一般无 GPU)"
+		return T("not detected (no nvidia-smi; usually no GPU on cloud VPS)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -121,18 +122,18 @@ func gpuInfo() string {
 		"--query-gpu=name,utilization.gpu,memory.used,memory.total",
 		"--format=csv,noheader,nounits").Output()
 	if err != nil {
-		return "读取失败: " + err.Error()
+		return TF("read failed: %v", err)
 	}
 	var parts []string
 	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(ln, ",")
 		if len(f) >= 4 {
-			parts = append(parts, fmt.Sprintf("%s: 利用率 %s%% | 显存 %s/%s MiB",
+			parts = append(parts, TF("%s: util %s%% | vram %s/%s MiB",
 				strings.TrimSpace(f[0]), strings.TrimSpace(f[1]), strings.TrimSpace(f[2]), strings.TrimSpace(f[3])))
 		}
 	}
 	if len(parts) == 0 {
-		return "无数据"
+		return T("no data")
 	}
 	return strings.Join(parts, " ; ")
 }
@@ -140,7 +141,7 @@ func gpuInfo() string {
 // ---- API ----
 
 type diagMetric struct {
-	Name   string  `json:"name"`
+	Key    string  `json:"key"`
 	Unit   string  `json:"unit,omitempty"`
 	Cur    float64 `json:"cur"`
 	P50    float64 `json:"p50"`
@@ -155,17 +156,44 @@ type diagResp struct {
 	Sec     int          `json:"sec"`
 	Samples int          `json:"samples"`
 	NumCPU  int          `json:"num_cpu"`
-	Top     string       `json:"top"`
+	TopKey  string       `json:"top_key"`
+	TopPct  float64      `json:"top_pct"`
 	GPU     string       `json:"gpu"`
 	RxKBps  float64      `json:"rx_kbps"`
 	TxKBps  float64      `json:"tx_kbps"`
 	Metrics []diagMetric `json:"metrics"`
 }
 
+// 指标 key → 英文标签(zhDict 提供中文),顺序即展示顺序
+var diagLabels = []struct{ Key, En, Unit string }{
+	{"cpu_util", "CPU usage", "%"},
+	{"cpu_steal", "CPU steal (stolen)", "%"},
+	{"mem_used", "memory used", "%"},
+	{"load_per_core", "load per core", ""},
+	{"disk_util", "disk IO util", "%"},
+	{"disk_await", "disk await", "ms"},
+	{"tcp_est", "TCP conns (ESTAB)", "conn"},
+	{"ctx_switch", "context switches", "/s"},
+}
+
+func diagLabel(key string) string {
+	for _, l := range diagLabels {
+		if l.Key == key {
+			return T(l.En)
+		}
+	}
+	return key
+}
+
+var diagIdeals = map[string]float64{
+	"cpu_util": 70, "cpu_steal": 1, "mem_used": 80, "load_per_core": 0.7,
+	"disk_util": 50, "disk_await": 5, "tcp_est": 1000, "ctx_switch": 50000,
+}
+
 func handleDiag(w http.ResponseWriter, r *http.Request) {
 	sec := qInt(r, "sec", 10, 3, 300)
 	n := 0
-	var cpuU, cpuStl, memU, loadC, dUtil, dAwait, tcpE, ctxS []float64
+	series := map[string][]float64{}
 	var rxRate, txRate float64
 
 	var prevCT *cpuTimes
@@ -188,14 +216,14 @@ func handleDiag(w http.ResponseWriter, r *http.Request) {
 			pct := func(d uint64) float64 { return float64(d) / float64(dt) * 100 }
 			busy := ct.user - prevCT.user + ct.nice - prevCT.nice + ct.system - prevCT.system +
 				ct.irq - prevCT.irq + ct.softirq - prevCT.softirq
-			cpuU = append(cpuU, pct(busy))
-			cpuStl = append(cpuStl, pct(ct.steal-prevCT.steal))
+			series["cpu_util"] = append(series["cpu_util"], pct(busy))
+			series["cpu_steal"] = append(series["cpu_steal"], pct(ct.steal-prevCT.steal))
 		}
 		if total > 0 {
-			memU = append(memU, float64(total-avail)/float64(total)*100)
+			series["mem_used"] = append(series["mem_used"], float64(total-avail)/float64(total)*100)
 		}
 		if nc := numCPU(); nc > 0 {
-			loadC = append(loadC, l1/float64(nc))
+			series["load_per_core"] = append(series["load_per_core"], l1/float64(nc))
 		}
 		// 磁盘:取 util 最高的那块盘
 		bestUtil, bestAwait := 0.0, 0.0
@@ -214,17 +242,15 @@ func handleDiag(w http.ResponseWriter, r *http.Request) {
 				bestUtil, bestAwait = util, await
 			}
 		}
-		dUtil = append(dUtil, bestUtil)
-		dAwait = append(dAwait, bestAwait)
-		if tcp >= 0 {
-			tcpE = append(tcpE, float64(tcp))
-		}
+		series["disk_util"] = append(series["disk_util"], bestUtil)
+		series["disk_await"] = append(series["disk_await"], bestAwait)
+		series["tcp_est"] = append(series["tcp_est"], float64(tcp))
 		if haveNet {
 			rxRate = float64(rx-prevRx) / 1024
 			txRate = float64(tx-prevTx) / 1024
 		}
 		if haveCtx {
-			ctxS = append(ctxS, float64(ctx-prevCtx))
+			series["ctx_switch"] = append(series["ctx_switch"], float64(ctx-prevCtx))
 		}
 		c := ct
 		prevCT = &c
@@ -237,16 +263,18 @@ func handleDiag(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(time.Second)
 	}
 
-	mk := func(name, unit string, vals []float64, ideal float64) diagMetric {
+	var metrics []diagMetric
+	for _, l := range diagLabels {
+		vals := series[l.Key]
 		st := statsOf(vals)
 		var cur float64
 		if st.N > 0 {
 			cur = vals[len(vals)-1]
 		}
-		m := diagMetric{Name: name, Unit: unit, Cur: r2(cur),
-			P50: r2(st.P50), P95: r2(st.P95), P99: r2(st.P99), Ideal: ideal}
-		if ideal > 0 {
-			m.Ratio = r2(cur / ideal * 100)
+		m := diagMetric{Key: l.Key, Unit: l.Unit, Cur: r2(cur),
+			P50: r2(st.P50), P95: r2(st.P95), P99: r2(st.P99), Ideal: diagIdeals[l.Key]}
+		if m.Ideal > 0 {
+			m.Ratio = r2(cur / m.Ideal * 100)
 			switch {
 			case m.Ratio > 100:
 				m.Status = "bad"
@@ -258,29 +286,18 @@ func handleDiag(w http.ResponseWriter, r *http.Request) {
 		} else {
 			m.Status = "info"
 		}
-		return m
+		metrics = append(metrics, m)
 	}
-
-	metrics := []diagMetric{
-		mk("CPU 使用率", "%", cpuU, 70),
-		mk("CPU steal 被偷取", "%", cpuStl, 1),
-		mk("内存使用率", "%", memU, 80),
-		mk("负载/核", "", loadC, 0.7),
-		mk("磁盘 IO util", "%", dUtil, 50),
-		mk("磁盘 await", "ms", dAwait, 5),
-		mk("TCP 连接(ESTAB)", "条", tcpE, 1000),
-		mk("上下文切换", "次/s", ctxS, 50000),
-	}
-	topName, topRatio := "—", -1.0
+	topKey, topPct := "", -1.0
 	for _, m := range metrics {
-		if m.Ideal > 0 && m.Ratio > topRatio {
-			topRatio, topName = m.Ratio, m.Name
+		if m.Ideal > 0 && m.Ratio > topPct {
+			topPct, topKey = m.Ratio, m.Key
 		}
 	}
 
 	writeJSON(w, 200, diagResp{
 		Sec: sec, Samples: n, NumCPU: numCPU(),
-		Top:    fmt.Sprintf("%s(占理想上限 %.0f%%)", topName, topRatio),
+		TopKey: topKey, TopPct: r2(topPct),
 		GPU:    gpuInfo(),
 		RxKBps: r2(rxRate), TxKBps: r2(txRate),
 		Metrics: metrics,
@@ -291,13 +308,13 @@ func handleDiag(w http.ResponseWriter, r *http.Request) {
 
 func runDiagCmd(args []string) {
 	fs := flag.NewFlagSet("diag", flag.ExitOnError)
-	sec := fs.Int("d", 10, "采样秒数")
-	tok := fs.String("token", "", "服务端令牌")
+	sec := fs.Int("d", 10, T("sampling seconds"))
+	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
 	base := targetURL(fs)
 	clientToken = *tok
 	cl := newHTTPClient(2, 5*time.Minute)
-	fmt.Printf("采样中(%d 秒)…\n", *sec)
+	fmt.Printf(T("sampling (%d s)...\n"), *sec)
 	var d diagResp
 	if err := getJSON(cl, withTok(base+"/api/diag?sec="+strconv.Itoa(*sec)), &d); err != nil {
 		fail(err)
@@ -307,29 +324,30 @@ func runDiagCmd(args []string) {
 }
 
 func printDiag(d *diagResp) {
-	hdr(fmt.Sprintf("一键诊断(%ds 采样 %d 点 | %d 核)", d.Sec, d.Samples, d.NumCPU))
-	fmt.Printf("  🔺 最大负载来源: %s\n\n", d.Top)
+	hdr(TF("Quick diagnosis (%ds, %d samples | %d cores)", d.Sec, d.Samples, d.NumCPU))
+	fmt.Printf("  "+T("🔺 highest-load source: %s (%.0f%% of ideal cap)")+"\n", diagLabel(d.TopKey), d.TopPct)
+	fmt.Println()
 	fmt.Printf("  %-22s %10s %9s %9s %9s %9s %8s  %s\n",
-		"指标", "当前", "p50", "p95", "p99", "理想上限", "占理想%", "状态")
+		T("metric"), T("cur"), "p50", "p95", "p99", T("ideal cap"), T("of ideal %"), T("status"))
 	for _, m := range d.Metrics {
-		name := m.Name
+		name := diagLabel(m.Key)
 		if m.Unit != "" {
 			name += "(" + m.Unit + ")"
 		}
-		ideal, ratio := "参考", "—"
+		ideal, ratio := T("ref"), "—"
 		if m.Ideal > 0 {
 			ideal = fmt.Sprintf("%g", m.Ideal)
 			ratio = fmt.Sprintf("%.0f%%", m.Ratio)
 		}
-		st := map[string]string{"ok": "✓", "warn": "△ 偏高", "bad": "⚠ 超标"}[m.Status]
+		st := map[string]string{"ok": "✓", "warn": T("△ high"), "bad": T("⚠ over")}[m.Status]
 		if st == "" {
 			st = "·"
 		}
 		fmt.Printf("  %-22s %10.2f %9.2f %9.2f %9.2f %9s %8s  %s\n",
 			name, m.Cur, m.P50, m.P95, m.P99, ideal, ratio, st)
 	}
-	fmt.Printf("\n  GPU      : %s\n", d.GPU)
-	fmt.Printf("  网络吞吐 : 收 %.0f KB/s | 发 %.0f KB/s(参考,不计入排名)\n", d.RxKBps, d.TxKBps)
-	fmt.Println("  说明: 占理想% = 当前/理想上限;>80% 偏高,>100% 超标。理想值参考:CPU≤70%")
-	fmt.Println("        steal≤1% 内存≤80% 负载≤0.7/核 磁盘util≤50% await≤5ms TCP≤1000 切换≤5万/s")
+	fmt.Printf("\n  "+T("GPU      : %s\n"), d.GPU)
+	fmt.Printf("  "+T("network  : rx %.0f KB/s | tx %.0f KB/s (reference)\n"), d.RxKBps, d.TxKBps)
+	fmt.Println("  " + T("Note: of-ideal% = current/ideal cap; >80% high, >100% over."))
+	fmt.Println("  " + T("ideals: CPU≤70% steal≤1% mem≤80% load≤0.7/core diskutil≤50% await≤5ms TCP≤1000 ctx≤50k/s"))
 }

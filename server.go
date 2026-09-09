@@ -129,23 +129,21 @@ func runServer(args []string) {
 	mon.Start()
 
 	total, avail := readMemKB()
-	fmt.Printf(`vpsbench 服务端已启动(Gin + 内嵌网页)
-  监听     : %s
-  CPU      : %d 核 | Go %d
-  内存     : %d MB / %d MB
-  磁盘目录 : %s
-  令牌     : %s
-
-▶ 浏览器打开  http://<本机公网IP>%s  点按钮即可测试
-▶ 内网/命令行: ./vpsbench all http://<本机IP>%s
-提示: 防火墙记得放行端口(如 ufw allow 8300);测完记得关服务
-`, *addr, runtime.NumCPU(), runtime.GOMAXPROCS(0), avail/1024, total/1024, diskDir,
-		func() string {
-			if globalToken == "" {
-				return "未设置(公开访问)"
-			}
-			return "已启用"
-		}(), normPort(*addr), normPort(*addr))
+	fmt.Print(T("vpsbench server started (Gin + embedded web UI)") + "\n")
+	fmt.Printf("  %-10s: %s\n", T("listen"), *addr)
+	fmt.Printf("  %-10s: %d %s | Go %d\n", "CPU", runtime.NumCPU(), T("cores"), runtime.GOMAXPROCS(0))
+	fmt.Printf("  %-10s: %d MB / %d MB\n", T("memory"), avail/1024, total/1024)
+	fmt.Printf("  %-10s: %s\n", T("disk dir"), diskDir)
+	fmt.Printf("  %-10s: %s\n", T("token"), func() string {
+		if globalToken == "" {
+			return T("not set (public access)")
+		}
+		return T("enabled")
+	}())
+	fmt.Println()
+	fmt.Println(TF("▶ open in browser  http://<public-ip>%s   — click buttons to test", normPort(*addr)))
+	fmt.Println(TF("▶ from LAN/CLI   : ./vpsbench all http://<ip>%s", normPort(*addr)))
+	fmt.Println(T("Note: open the port in firewall (e.g. ufw allow 8300); stop the server when done."))
 
 	srv := &http.Server{
 		Addr:              *addr,

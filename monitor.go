@@ -185,12 +185,12 @@ func (m *Monitor) takeSample() {
 	if stealPct >= stealEvtThr && now.Sub(m.lastEvt["steal"]) > 5*time.Second {
 		m.lastEvt["steal"] = now
 		m.pushEvent(SpikeEvent{T: now, Kind: "steal", StealPct: r2(stealPct)})
-		fmt.Printf("[%s] ⚠ 检测到 CPU steal %.1f%%(宿主机把 CPU 偷给了邻居)\n", now.Format("15:04:05"), stealPct)
+		fmt.Printf("[%s] ⚠ "+T("CPU steal %.1f%% detected (host gave CPU to neighbors)")+"\n", now.Format("15:04:05"), stealPct)
 	}
 	if jitMax >= jitEvtThr && now.Sub(m.lastEvt["jitter"]) > 5*time.Second {
 		m.lastEvt["jitter"] = now
 		m.pushEvent(SpikeEvent{T: now, Kind: "jitter", JitterMs: r2(jitMax)})
-		fmt.Printf("[%s] ⚠ 检测到调度抖动尖刺 %.1fms(基准 10ms,疑似被偷取/争抢)\n", now.Format("15:04:05"), jitMax)
+		fmt.Printf("[%s] ⚠ "+T("scheduling jitter spike %.1fms (base 10ms, likely steal/contention)")+"\n", now.Format("15:04:05"), jitMax)
 	}
 
 	if ctOK {
