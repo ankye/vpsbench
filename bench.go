@@ -63,6 +63,34 @@ func targetURL(fs *flag.FlagSet) string {
 	return u
 }
 
+var embeddedSrvs []*http.Server
+
+// startEmbedded 在本进程内起一个仅监听回环的临时服务,用于免 server 自测
+func startEmbedded() string {
+	if diskDir == "" {
+		diskDir = os.TempDir()
+	}
+	srv := &http.Server{Handler: newRouter(), ReadHeaderTimeout: 10 * time.Second}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, T("✗ cannot start embedded server:"), err)
+		os.Exit(1)
+	}
+	go srv.Serve(ln)
+	embeddedSrvs = append(embeddedSrvs, srv)
+	return "http://" + ln.Addr().String()
+}
+
+// resolveTargetURL:URL 省略 ⇒ 进程内自测(不开外部端口);给了 URL ⇒ 作为远程客户端
+func resolveTargetURL(fs *flag.FlagSet) string {
+	if fs.NArg() == 0 {
+		base := startEmbedded()
+		fmt.Println("ℹ " + T("no URL given — testing this machine via an in-process server (loopback)"))
+		return base
+	}
+	return targetURL(fs)
+}
+
 func withTok(s string) string {
 	if clientToken == "" {
 		return s
@@ -102,7 +130,7 @@ func hdr(title string) { fmt.Printf("\n━━━ %s ━━━\n", title) }
 func kv(k string, v any) { fmt.Printf("  %-28s %v\n", T(k)+":", v) }
 
 func fail(err error) {
-	fmt.Println("  " + T("✗ failed:"), err)
+	fmt.Println("  "+T("✗ failed:"), err)
 }
 
 // ---- ping: 延迟 / 抖动 ----
@@ -113,7 +141,7 @@ func runPingCmd(args []string) {
 	iv := fs.Duration("i", 100*time.Millisecond, T("send interval"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 	testPing(base, *d, *iv)
 }
@@ -181,7 +209,7 @@ func runLoadCmd(args []string) {
 	size := fs.Int("size", 0, T("response packet size in bytes (0=tiny ping), e.g. 1024/2048/4096"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 	res := testLoad(base, *c, *d, *size)
 	printLoadResult(res, base)
@@ -302,7 +330,7 @@ func runPacketCmd(args []string) {
 	sizes := fs.String("sizes", "1024,2048,4096", T("comma-separated packet sizes in bytes (≤65536)"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 
 	var ss []int
@@ -362,7 +390,7 @@ func runConnCmd(args []string) {
 	step := fs.Int("step", 50, T("new connections per wave"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 
 	hdr(TF("Max concurrent connections (target %d, +%d per wave, hold %s)", *c, *step, *hold))
@@ -420,7 +448,7 @@ func runBWCmd(args []string) {
 	up := fs.Bool("up", false, T("test upload (default: download)"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 	testBW(base, *d, *c, *up)
 }
@@ -484,7 +512,7 @@ func runCPUCmd(args []string) {
 	runs := fs.Int("runs", 3, T("runs, keep best"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 	testCPU(base, *ms, *runs)
 }
@@ -514,7 +542,7 @@ func runFillCmd(args []string) {
 	ms := fs.Int("ms", 5000, T("duration in ms"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 	testFill(base, *n, *ms, 0)
 }
@@ -563,7 +591,7 @@ func runDiskCmd(args []string) {
 	files := fs.Int("files", 100, T("small file count (fsync samples)"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 	testDisk(base, *mb, *files)
 }
@@ -601,7 +629,7 @@ func runStealCmd(args []string) {
 	watch := fs.Bool("w", false, T("watch mode, refresh every 5s"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 	cl := newHTTPClient(2, 15*time.Second)
 	if !*watch {
@@ -630,7 +658,7 @@ func runStealCmd(args []string) {
 func printSnapshot(s *StatsSnapshot, detail bool) {
 	hdr(T("Server steal report (shared-host detection)"))
 	kv("host", TF("%s | %d cores | monitoring for %s", s.Hostname, s.NumCPU,
-		(time.Duration(s.UptimeSec * float64(time.Second))).Round(time.Second)))
+		(time.Duration(s.UptimeSec*float64(time.Second))).Round(time.Second)))
 	kv("memory", TF("%d MB avail / %d MB", s.MemAvailMB, s.MemTotalMB))
 	kv("load (1/5/15m)", fmt.Sprintf("%.2f / %.2f / %.2f", s.Load[0], s.Load[1], s.Load[2]))
 	fmt.Println()
@@ -699,7 +727,7 @@ func runAllCmd(args []string) {
 	fd := fs.Int("fill-ms", 8000, T("full-load test duration in ms"))
 	tok := fs.String("token", "", T("server token"))
 	fs.Parse(reorderArgs(fs, args))
-	base := targetURL(fs)
+	base := resolveTargetURL(fs)
 	clientToken = *tok
 
 	cl := newHTTPClient(4, 15*time.Second)

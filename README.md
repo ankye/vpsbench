@@ -5,9 +5,20 @@
 Single static binary. Two ways to use, same API:
 
 1. **Gin server + embedded web UI** — run on the VPS under test, open in browser, click buttons.
-2. **CLI client** — drive the same API from LAN / headless machines.
+2. **CLI client** — drive the same API from LAN / headless machines. **No server needed**: omit `<url>` and every command self-tests the local machine via an in-process server.
 
 English by default (mojibake-safe); add `-lang zh` (or env `VPSBENCH_LANG=zh`) for Chinese.
+
+## One-click acceptance inspection (new VPS)
+
+```bash
+vpsbench inspect -cores 2 -ram 4 -disk 80 -lang zh   # 8-step wizard, Enter through each step
+```
+
+7 checks + acceptance sheet: specs vs your order, CPU reality & oversell, memory, disk/IO,
+network (public IP/geo, IPv6, DNS, downlink, loopback RPS), **idle steal & jitter**,
+security baseline (sshd, UID-0 users, brute-force records, firewall, pending updates).
+Exit code 0/1/2 = accepted / with notes / rejected. Report saved to `~/vpsbench-inspect-*.txt`.
 
 ## One-click install (curl from GitHub Releases)
 

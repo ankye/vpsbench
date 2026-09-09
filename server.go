@@ -46,14 +46,14 @@ func randBuf(n int) []byte {
 // ---- API 响应结构(客户端共用) ----
 
 type infoResp struct {
-	Hostname    string  `json:"hostname"`
-	Kernel      string  `json:"kernel"`
-	NumCPU      int     `json:"num_cpu"`
-	GOMAXPROCS  int     `json:"gomaxprocs"`
-	MemTotalMB  int64   `json:"mem_total_mb"`
-	MemAvailMB  int64   `json:"mem_avail_mb"`
-	UptimeSec   float64 `json:"uptime_sec"`
-	GoVersion   string  `json:"go_version"`
+	Hostname   string  `json:"hostname"`
+	Kernel     string  `json:"kernel"`
+	NumCPU     int     `json:"num_cpu"`
+	GOMAXPROCS int     `json:"gomaxprocs"`
+	MemTotalMB int64   `json:"mem_total_mb"`
+	MemAvailMB int64   `json:"mem_avail_mb"`
+	UptimeSec  float64 `json:"uptime_sec"`
+	GoVersion  string  `json:"go_version"`
 }
 
 type cpuResp struct {
@@ -63,10 +63,10 @@ type cpuResp struct {
 }
 
 type fillResp struct {
-	ReqCores        int     `json:"req_cores"`
-	Ms              float64 `json:"ms"`
-	CPUSec          float64 `json:"cpu_sec"`          // 实际拿到的 CPU 时间
-	EffectiveCores  float64 `json:"effective_cores"`  // 实际可用核数 = cpu_sec / wall
+	ReqCores         int     `json:"req_cores"`
+	Ms               float64 `json:"ms"`
+	CPUSec           float64 `json:"cpu_sec"`          // 实际拿到的 CPU 时间
+	EffectiveCores   float64 `json:"effective_cores"`  // 实际可用核数 = cpu_sec / wall
 	OpsPerCorePerSec float64 `json:"ops_per_core_sec"` // 满载时单核算力
 }
 
@@ -84,14 +84,14 @@ type fsyncStat struct {
 }
 
 type diskResp struct {
-	SeqMB       int       `json:"seq_mb"`
-	WriteMs     float64   `json:"write_ms"`
-	FsyncMs     float64   `json:"fsync_ms"`
-	ReadMs      float64   `json:"read_ms"`
-	WriteMBps   float64   `json:"write_mbps"`
-	ReadMBps    float64   `json:"read_mbps"`
-	SmallFiles  int       `json:"small_files"`
-	Fsync       fsyncStat `json:"fsync"`
+	SeqMB      int       `json:"seq_mb"`
+	WriteMs    float64   `json:"write_ms"`
+	FsyncMs    float64   `json:"fsync_ms"`
+	ReadMs     float64   `json:"read_ms"`
+	WriteMBps  float64   `json:"write_mbps"`
+	ReadMBps   float64   `json:"read_mbps"`
+	SmallFiles int       `json:"small_files"`
+	Fsync      fsyncStat `json:"fsync"`
 }
 
 type uploadResp struct {

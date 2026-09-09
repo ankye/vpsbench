@@ -39,29 +39,29 @@ type SpikeEvent struct {
 }
 
 type StatsSnapshot struct {
-	StartedAt    time.Time    `json:"started_at"`
-	UptimeSec    float64      `json:"uptime_sec"`
-	Hostname     string       `json:"hostname"`
-	Kernel       string       `json:"kernel"`
-	NumCPU       int          `json:"num_cpu"`
-	SampleCount  int          `json:"sample_count"`
-	StealCur     float64      `json:"steal_cur"`
-	StealAvg     float64      `json:"steal_avg"`
-	StealP95     float64      `json:"steal_p95"`
-	StealMax     float64      `json:"steal_max"`
-	JitInterval  int          `json:"jit_interval_ms"`
-	JitP50       float64      `json:"jit_p50_ms"`
-	JitP95       float64      `json:"jit_p95_ms"`
-	JitP99       float64      `json:"jit_p99_ms"`
-	JitMax       float64      `json:"jit_max_ms"`
-	JitOver10    uint64       `json:"jit_over_10ms"`
-	JitOver50    uint64       `json:"jit_over_50ms"`
-	JitOver100   uint64       `json:"jit_over_100ms"`
-	Load         [3]float64   `json:"load"`
-	MemTotalMB   int64        `json:"mem_total_mb"`
-	MemAvailMB   int64        `json:"mem_avail_mb"`
-	Spikes       []SpikeEvent `json:"spikes,omitempty"`
-	Samples      []SecSample  `json:"samples,omitempty"` // ?full=1 时返回全部
+	StartedAt   time.Time    `json:"started_at"`
+	UptimeSec   float64      `json:"uptime_sec"`
+	Hostname    string       `json:"hostname"`
+	Kernel      string       `json:"kernel"`
+	NumCPU      int          `json:"num_cpu"`
+	SampleCount int          `json:"sample_count"`
+	StealCur    float64      `json:"steal_cur"`
+	StealAvg    float64      `json:"steal_avg"`
+	StealP95    float64      `json:"steal_p95"`
+	StealMax    float64      `json:"steal_max"`
+	JitInterval int          `json:"jit_interval_ms"`
+	JitP50      float64      `json:"jit_p50_ms"`
+	JitP95      float64      `json:"jit_p95_ms"`
+	JitP99      float64      `json:"jit_p99_ms"`
+	JitMax      float64      `json:"jit_max_ms"`
+	JitOver10   uint64       `json:"jit_over_10ms"`
+	JitOver50   uint64       `json:"jit_over_50ms"`
+	JitOver100  uint64       `json:"jit_over_100ms"`
+	Load        [3]float64   `json:"load"`
+	MemTotalMB  int64        `json:"mem_total_mb"`
+	MemAvailMB  int64        `json:"mem_avail_mb"`
+	Spikes      []SpikeEvent `json:"spikes,omitempty"`
+	Samples     []SecSample  `json:"samples,omitempty"` // ?full=1 时返回全部
 }
 
 type Monitor struct {

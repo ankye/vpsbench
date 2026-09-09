@@ -12,6 +12,10 @@ var indexHTML []byte
 
 // newRouter 构建 gin 路由:内嵌 HTML 控制台 + 全部测试 API
 func newRouter() *gin.Engine {
+	if mon == nil { // 进程内/免 server 模式也要有监控
+		mon = NewMonitor()
+		mon.Start()
+	}
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
