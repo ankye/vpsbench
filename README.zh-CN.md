@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/ankye/vpsbench/main/install.sh | sh
 
 脚本自动识别 系统/架构(linux/darwin × amd64/arm64/386/arm),从最新
 [Release](https://github.com/ankye/vpsbench/releases) 下载对应静态二进制并校验 SHA-256。
-指定版本:`VPSBENCH_VERSION=v1.0.0`。
+指定版本:`VPSBENCH_VERSION=v1.0.2`。
 
 想直接下载?按平台取对应文件:
 
@@ -63,6 +63,7 @@ vpsbench steal http://<vps-ip>:8300 -w          # 挂 24h 抓高峰期偷取
 
 | 命令 / 按钮 | 测什么 |
 |---|---|
+| `inspect` | **一键验货**:8 步验收向导(配置与订单比对、CPU 超售、内存、磁盘、网络、空闲偷取、安全基线)+ 验收单,退出码 0/1/2 |
 | `ping` | RTT 分位延迟 + 抖动,抓邻居偷取造成的延迟尖刺 |
 | `load -c 50 [-size N]` | HTTP 并发压测:RPS / 错误率 / p99(size=响应包字节) |
 | `packet -c 100` | **1K/2K/4K 包尺寸并发阶梯**:RPS / 吞吐 / 分位延迟 + 瓶颈分析 |

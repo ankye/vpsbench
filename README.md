@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/ankye/vpsbench/main/install.sh | sh
 The script auto-detects your OS/architecture (linux/darwin × amd64/arm64/386/arm),
 downloads the matching static binary from the latest
 [Release](https://github.com/ankye/vpsbench/releases) and verifies its SHA-256.
-Pin a version with `VPSBENCH_VERSION=v1.0.0`.
+Pin a version with `VPSBENCH_VERSION=v1.0.2`.
 
 Prefer a direct download? Pick your platform:
 
@@ -64,6 +64,7 @@ vpsbench steal http://<vps-ip>:8300 -w          # keep watching 24h for peak-hou
 
 | Command / button | Measures |
 |---|---|
+| `inspect` | **One-click acceptance inspection**: 8-step wizard (specs vs order, CPU oversell, memory, disk, network, idle steal, security baseline) + acceptance sheet, exit code 0/1/2 |
 | `ping` | RTT percentiles + jitter, catches steal-induced latency spikes |
 | `load -c 50 [-size N]` | HTTP concurrency: RPS / error rate / p99 (size = response bytes) |
 | `packet -c 100` | 1K/2K/4K packet-size ladder: RPS / throughput / percentiles + bottleneck analysis |
