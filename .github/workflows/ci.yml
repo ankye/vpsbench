@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build -o vpsbench .
+      - name: Smoke test (server + API + CLI)
+        run: |
+          ./vpsbench server -addr 127.0.0.1:8301 &
+          sleep 2
+          ./vpsbench cpu http://127.0.0.1:8301 -ms 200 -runs 1
+          ./vpsbench ping http://127.0.0.1:8301 -d 1s -i 100ms
+          ./vpsbench diag http://127.0.0.1:8301 -d 3
+          curl -fsS http://127.0.0.1:8301/ | head -c 100
+          curl -fsS "http://127.0.0.1:8301/api/echo?size=1024" | wc -c
+          kill %1
